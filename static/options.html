@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>Extension Settings</title>
+  <style>
+    body {
+      padding: 15px;
+      min-width: 400px;
+      font-family: sans-serif;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: bold;
+    }
+
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 1rem;
+      box-sizing: border-box;
+    }
+
+    #status {
+      margin-top: 1rem;
+      padding: 8px;
+    }
+
+    .success {
+      background: #dff0d8;
+      color: #3c763d;
+    }
+
+    .error {
+      background: #f2dede;
+      color: #a94442;
+    }
+
+    #save {
+      padding: 8px 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+
+    #save:hover {
+      background: #45a049;
+    }
+
+    .provider-options {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .provider-options label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>Letterboxd Stream Filter</h2>
+  <div class="form-group">
+    <label for="apiKey">TMDB API Key:</label>
+    <input type="password" id="apiKey" placeholder="Enter your TMDB API key">
+  </div>
+  <div class="form-group">
+    <label>Streaming Providers:</label>
+    <div class="provider-options">
+      <label><input type="checkbox" name="provider" value="netflix"> Netflix</label>
+      <label><input type="checkbox" name="provider" value="hulu"> Hulu</label>
+      <label><input type="checkbox" name="provider" value="amazon"> Amazon Prime</label>
+      <label><input type="checkbox" name="provider" value="disney"> Disney+</label>
+      <label><input type="checkbox" name="provider" value="hbo"> HBO Max</label>
+      <label><input type="checkbox" name="provider" value="apple"> Apple TV+</label>
+      <label><input type="checkbox" name="provider" value="paramount"> Paramount+</label>
+      <label><input type="checkbox" name="provider" value="peacock"> Peacock</label>
+    </div>
+  </div>
+  <div class="form-group">
+    <label for="country">Country:</label>
+    <select id="country" class="form-control">
+      <option value="">Loading countries...</option>
+    </select>
+  </div>
+  <button id="save">Save Settings</button>
+  <div id="status"></div>
+  <script src="../dist/options.js"></script>
+  <script>
+    // Load countries when options page opens
+    document.addEventListener('DOMContentLoaded', async () => {
+      const countries = await browser.runtime.sendMessage({ action: 'getCountries' });
+      const select = document.getElementById('country');
+
+      select.innerHTML = countries.map(c =>
+        `<option value="${c.iso_3166_1}">${c.english_name}</option>`
+      ).join('');
+
+      // Load saved selection
+      const saved = await browser.storage.local.get('countryCode');
+      if (saved.countryCode) {
+        select.value = saved.countryCode;
+      }
+    });
+  </script>
+</body>
+
+</html>

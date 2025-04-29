@@ -1,0 +1,18 @@
+{
+    "compilerOptions": {
+        "module": "ESNext",
+        "strict": true,
+        "moduleResolution": "node",
+        "lib": [
+            "ES2019",
+            "DOM"
+        ],
+        "target": "ES2019",
+        "types": [
+            "firefox-webext-browser"
+        ]
+    },
+    "include": [
+        "src/**/*.ts"
+    ]
+}

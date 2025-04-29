@@ -1,0 +1,33 @@
+{
+    "manifest_version": 2,
+    "name": "Letterboxd Stream Filter",
+    "version": "1.0",
+    "description": "Gray out movies not available on specified streaming services",
+    "permissions": [
+        "https://letterboxd.com/*",
+        "https://api.themoviedb.org/*",
+        "storage"
+    ],
+    "background": {
+        "scripts": [
+            "dist/background.js"
+        ]
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://letterboxd.com/*"
+            ],
+            "js": [
+                "dist/content-script.js"
+            ],
+            "css": [
+                "static/styles.css"
+            ]
+        }
+    ],
+    "options_ui": {
+        "page": "static/options.html",
+        "browser_style": true
+    }
+}
