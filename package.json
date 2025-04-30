@@ -3,9 +3,10 @@
     "version": "1.0.0",
     "scripts": {
         "build": "webpack --mode=development",
+        "build:prod": "webpack --mode=production",
         "watch": "webpack --watch --mode=development",
-        "export": "webpack --mode=production && zip -r ./dist/letterboxd-utils.zip ./dist",
-        "export:dev": "webpack --mode=development && zip -r ./dist/letterboxd-utils.zip ./dist"
+        "export": "webpack --mode=production && cd dist && zip -r ../letterboxd-utils.zip ./*",
+        "export:dev": "webpack --mode=development && cd dist && zip -r ../letterboxd-utils.zip ./*"
     },
     "devDependencies": {
         "@types/firefox-webext-browser": "^82.0.0",

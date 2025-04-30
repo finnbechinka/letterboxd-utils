@@ -1,0 +1,53 @@
+name: Build and Package Extension
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Build production version
+      run: npm run build:prod
+      
+    - name: Create versioned artifact name
+      run: |
+        VERSION=$(date +'%Y.%m.%d-%H%M')
+        echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
+      
+    - name: Upload built extension
+      uses: actions/upload-artifact@v4
+      with:
+        name: letterboxd-extension-${{ env.PACKAGE_VERSION }}
+        path: dist/
+        retention-days: 7
+      
+    - name: Prepare source code (no manual zip)
+      run: |
+        mkdir -p source-code-temp
+        rsync -a --exclude='node_modules/' \
+                  --exclude='dist/' \
+                  --exclude='.git/' \
+                  --exclude='*.log' \
+                  ./ source-code-temp/
+  
+    - name: Upload source code
+      uses: actions/upload-artifact@v4
+      with:
+        name: source-code-${{ env.PACKAGE_VERSION }}
+        path: source-code-temp/
