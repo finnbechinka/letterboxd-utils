@@ -2,8 +2,10 @@
     "name": "letterboxd-filter",
     "version": "1.0.0",
     "scripts": {
-        "build": "webpack",
-        "watch": "webpack --watch"
+        "build": "webpack --mode=development",
+        "watch": "webpack --watch --mode=development",
+        "export": "webpack --mode=production && zip -r ./dist/letterboxd-utils.zip ./dist",
+        "export:dev": "webpack --mode=development && zip -r ./dist/letterboxd-utils.zip ./dist"
     },
     "devDependencies": {
         "@types/firefox-webext-browser": "^82.0.0",
@@ -11,6 +13,7 @@
         "ts-loader": "^9.5.2",
         "typescript": "^4.0.0",
         "webpack": "^5.99.7",
-        "webpack-cli": "^6.0.1"
+        "webpack-cli": "^6.0.1",
+        "eslint": "^8.40.0"
     }
 }
