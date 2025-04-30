@@ -1,4 +1,5 @@
-import { ExtensionSettings } from './types';
+import { ExtensionSettings, TMDBRegion } from './types';
+import { logger } from './utils/logger';
 
 async function saveOptions() {
     const apiKey = (document.getElementById('apiKey') as HTMLInputElement).value.trim();
@@ -17,7 +18,7 @@ async function saveOptions() {
         await browser.storage.local.set(settings);
         showStatus('Settings saved successfully!', 'success');
     } catch (error) {
-        console.error('Error saving settings:', error);
+        logger.error('Error saving settings:', error);
         showStatus('Failed to save settings', 'error');
     }
 }
@@ -37,7 +38,26 @@ async function loadOptions() {
             });
         }
     } catch (error) {
-        console.error('Error loading settings:', error);
+        logger.error('Error loading settings:', error);
+    }
+}
+
+async function loadCountries() {
+    try {
+        const response = await browser.runtime.sendMessage({ action: 'getCountries' });
+        if (response.error) throw new Error(response.error);
+
+        const select = document.getElementById('country') as HTMLSelectElement;
+        select.innerHTML = response.map((c: TMDBRegion) =>
+            `<option value="${c.iso_3166_1}">${c.english_name}</option>`
+        ).join('');
+
+        const saved = await browser.storage.local.get('countryCode');
+        if (saved.countryCode) select.value = saved.countryCode;
+        select.disabled = false;
+    } catch (error: any) {
+        logger.error('Country load failed:', error);
+        document.getElementById('country-error')!.textContent = error.message;
     }
 }
 
@@ -48,5 +68,9 @@ function showStatus(message: string, type: 'success' | 'error') {
     setTimeout(() => status.textContent = '', 3000);
 }
 
-document.addEventListener('DOMContentLoaded', loadOptions);
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadOptions();
+    await loadCountries();
+});
 document.getElementById('save')?.addEventListener('click', saveOptions);
+

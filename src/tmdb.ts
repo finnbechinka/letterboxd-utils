@@ -1,35 +1,5 @@
-import { TMDBRegion } from './types';
-
-interface TMDBMovieSearchResult {
-    id: number;
-    title: string;
-    release_date?: string;
-    popularity: number;
-}
-
-interface TMDBSearchResponse {
-    page: number;
-    results: TMDBMovieSearchResult[];
-    total_pages: number;
-    total_results: number;
-}
-
-interface Provider {
-    provider_id: number;
-    provider_name: string;
-    logo_path: string;
-}
-
-interface ProviderCountry {
-    flatrate?: Provider[];
-}
-
-interface WatchProviderResponse {
-    id: number;
-    results: {
-        [countryCode: string]: ProviderCountry;
-    };
-}
+import { TMDBRegion, TMDBMovieSearchResult, TMDBSearchResponse, TMDBWatchProviderResponse } from './types';
+import { logger } from './utils/logger';
 
 export class TMDBClient {
     private readonly baseUrl = 'https://api.themoviedb.org/3';
@@ -60,6 +30,10 @@ export class TMDBClient {
         }
 
         const data: TMDBSearchResponse = await response.json();
+        if (data.total_results === 0) {
+            logger.warn(`[searchMovie] No results found for "${title}"${year ? ` (${year})` : ''}`);
+            return null;
+        }
         return data.results.sort((a, b) => b.popularity - a.popularity)[0] || null;
     }
 
@@ -82,7 +56,7 @@ export class TMDBClient {
             throw new Error(`TMDB providers failed: ${response.status}`);
         }
 
-        const data: WatchProviderResponse = await response.json();
+        const data: TMDBWatchProviderResponse = await response.json();
         const countryData = data.results[countryCode] || {};
 
         return countryData.flatrate?.map((p: any) => p.provider_name.toLowerCase()) || [];
@@ -90,7 +64,7 @@ export class TMDBClient {
 
     private async rateLimit(): Promise<void> {
         const now = Date.now();
-        const delay = Math.max(0, 250 - (now - this.lastCallTime)); // 4 requests/second
+        const delay = Math.max(0, 1000 - (now - this.lastCallTime)); // 1 requests/second
         if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
         this.lastCallTime = Date.now();
     }

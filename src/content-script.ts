@@ -1,25 +1,60 @@
+import { DEFAULT_COUNTRY, DEFAULT_PROVIDERS } from './constants';
 import { TMDBClient } from './tmdb'
 import { ExtensionSettings } from './types'
+import { logger } from './utils/logger';
 
 class StreamFilter {
     private tmdb: TMDBClient;
     private targetProviders: Set<string>;
-    private cache = new Map<string, boolean>();
+    private cache = new Map<string, { value: boolean; timestamp: number }>();
     private processedElements = new WeakSet<HTMLElement>();
+    private debounceTimer: number | null = null;
 
     constructor(apiKey: string, providers: string[], private countryCode: string) {
-        console.log('Initializing StreamFilter with providers:', providers);
+        logger.info('Initializing StreamFilter with providers:', providers);
         this.tmdb = new TMDBClient(apiKey);
         this.targetProviders = new Set(providers.map(p => p.toLowerCase()));
     }
 
+    private async withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+        try {
+            return await fn();
+        } catch (error) {
+            if (retries <= 0) throw error;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return this.withRetry(fn, retries - 1);
+        }
+    }
+
+    private getFromCache(key: string): boolean | null {
+        const entry = this.cache.get(key);
+        if (!entry) return null;
+        // 1 hour cache lifetime
+        if (Date.now() - entry.timestamp > 3600000) {
+            this.cache.delete(key);
+            return null;
+        }
+        return entry.value;
+    }
+
+    private setCache(key: string, value: boolean): void {
+        this.cache.set(key, {
+            value,
+            timestamp: Date.now()
+        });
+    }
+
+    private hasCache(key: string): boolean {
+        return this.cache.has(key);
+    }
+
     async processMovie(element: HTMLElement): Promise<void> {
-        console.log('[processMovie] Processing movie element:', element);
+        logger.info('[processMovie] Processing movie element:', element);
 
         const titleElement = element.querySelector('.frame-title');
 
         if (!titleElement) {
-            console.warn('[processMovie] No title element found, skipping');
+            logger.warn('[processMovie] No title element found, skipping');
             return;
         }
 
@@ -29,54 +64,68 @@ class StreamFilter {
         const year = yearMatch ? yearMatch[1] : '';
         const cacheKey = `${title}-${year}`;
 
-        console.log(`[processMovie] Extracted movie: ${title} (${year || 'no year'})`);
+        logger.info(`[processMovie] Extracted movie: ${title} (${year || 'no year'})`);
 
-        if (this.cache.has(cacheKey)) {
-            const isAvailable = this.cache.get(cacheKey)!;
-            console.log(`[processMovie] Cache hit - Available: ${isAvailable}`);
+        if (this.hasCache(cacheKey)) {
+            const isAvailable = this.getFromCache(cacheKey)!;
+            logger.info(`[processMovie] Cache hit - Available: ${isAvailable}`);
             this.updateElement(element, isAvailable);
             return;
         }
 
         try {
-            console.log('[processMovie] Starting TMDB search...');
-            const movie = await this.tmdb.searchMovie(title!, year ? parseInt(year) : undefined);
+            logger.info('[processMovie] Starting TMDB search...');
+            const movie = await this.withRetry(() =>
+                this.tmdb.searchMovie(title!, year ? parseInt(year) : undefined)
+            );
 
             if (!movie) {
-                console.warn('[processMovie] Movie not found in TMDB');
-                this.cache.set(cacheKey, false);
+                logger.warn('[processMovie] Movie not found in TMDB', title);
+                this.setCache(cacheKey, false);
                 this.updateElement(element, false);
                 return;
             }
 
-            console.log(`[processMovie] Found TMDB ID: ${movie.id}, now checking providers...`);
-            const providers = await this.tmdb.getStreamingProviders(movie.id, this.countryCode);
-            console.log('[processMovie] Available providers:', providers);
+            logger.info(`[processMovie] Found TMDB ID: ${movie.id}, now checking providers...`);
+            const providers = await this.withRetry(() =>
+                this.tmdb.getStreamingProviders(movie.id, this.countryCode)
+            );
+            logger.info('[processMovie] Available providers:', providers);
 
             const hasProvider = providers.some(p => this.targetProviders.has(p));
-            console.log(`[processMovie] Has target provider: ${hasProvider}`);
+            logger.info(`[processMovie] Has target provider: ${hasProvider}`);
 
-            this.cache.set(cacheKey, hasProvider);
+            this.setCache(cacheKey, hasProvider);
             this.updateElement(element, hasProvider);
         } catch (error) {
-            console.error('[processMovie] Error processing movie:', error);
-            this.cache.set(cacheKey, false);
+            logger.error('[processMovie] Error processing movie:', error);
+            this.setCache(cacheKey, false);
             this.updateElement(element, false);
         }
     }
 
     private updateElement(element: HTMLElement, isAvailable: boolean): void {
-        console.log(`[updateElement] Setting availability: ${isAvailable}`);
+        logger.info(`[updateElement] Setting availability: ${isAvailable}`);
         element.classList.toggle('unavailable-movie', !isAvailable);
     }
 
     public observePage(): void {
         const observer = new MutationObserver((mutations: MutationRecord[]) => {
+            if (this.debounceTimer) clearTimeout(this.debounceTimer);
+            this.debounceTimer = setTimeout(() => {
+                if (this.shouldProcessMutation(mutations)) {
+                    const newElements = this.findNewFilmElements(mutations);
+                    if (newElements.length) {
+                        console.log(`Processing ${newElements.length} new films`);
+                        newElements.forEach(el => this.processMovie(el));
+                    }
+                }
+            }, 500);
             if (!this.shouldProcessMutation(mutations)) return;
 
             const newElements = this.findNewFilmElements(mutations);
             if (newElements.length > 0) {
-                console.log(`Found ${newElements.length} new films to process`);
+                logger.info(`Found ${newElements.length} new films to process`);
                 newElements.forEach((el: HTMLElement) => this.processMovie(el));
             }
         });
@@ -123,7 +172,7 @@ class StreamFilter {
     }
 }
 
-console.log('[ContentScript] Initializing extension...');
+logger.info('[ContentScript] Initializing extension...');
 browser.storage.local.get(['tmdbApiKey', 'selectedProviders', 'countryCode'])
     .then((result: { [key: string]: any }) => {
         const settings = result as ExtensionSettings;
@@ -132,19 +181,19 @@ browser.storage.local.get(['tmdbApiKey', 'selectedProviders', 'countryCode'])
             return;
         }
 
-        const country = result.countryCode || 'DE';
-        const providers = settings.selectedProviders || ['netflix'];
+        const country = result.countryCode || DEFAULT_COUNTRY;
+        const providers = settings.selectedProviders || DEFAULT_PROVIDERS;
         new StreamFilter(settings.tmdbApiKey, providers, country).observePage();
     })
     .catch(error => {
-        console.error('Error loading settings:', error);
-        new StreamFilter('', ['netflix'], 'DE').observePage();
+        logger.error('Error loading settings:', error);
+        new StreamFilter('', DEFAULT_PROVIDERS, DEFAULT_COUNTRY).observePage();
     });
 
 
 
 function showApiKeyWarning(): void {
-    console.log('[showApiKeyWarning] Displaying warning to user');
+    logger.info('[showApiKeyWarning] Displaying warning to user');
     const warning = document.createElement('div');
     warning.style.cssText = `
     position: fixed;
@@ -167,4 +216,4 @@ function showApiKeyWarning(): void {
     document.body.appendChild(warning);
 }
 
-console.log('[ContentScript] Script loaded successfully');
+logger.info('[ContentScript] Script loaded successfully');

@@ -1,5 +1,6 @@
 import { TMDBClient } from './tmdb';
 import { TMDBRegion } from './types';
+import { logger } from './utils/logger';
 
 let cachedCountries: TMDBRegion[] = [];
 
@@ -12,10 +13,16 @@ export async function getCountries(): Promise<TMDBRegion[]> {
     return cachedCountries;
 }
 
-console.log("Background script loaded");
+logger.info("Background script loaded");
 
-browser.runtime.onMessage.addListener((request) => {
+browser.runtime.onMessage.addListener(async (request) => {
     if (request.action === 'getCountries') {
-        return getCountries();
+        try {
+            return await getCountries();
+        } catch (error) {
+            logger.error('Country fetch failed:', error);
+            return { error: 'Failed to load countries' };
+        }
     }
+    return undefined;
 });
