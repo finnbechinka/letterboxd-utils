@@ -190,11 +190,15 @@ browser.storage.local.get(['tmdbApiKey', 'selectedProviders', 'countryCode'])
         new StreamFilter('', DEFAULT_PROVIDERS, DEFAULT_COUNTRY).observePage();
     });
 
-
-
 function showApiKeyWarning(): void {
     logger.info('[showApiKeyWarning] Displaying warning to user');
+    const warningId = 'api-key-warning';
+
+    // Check if the warning already exists
+    if (document.getElementById(warningId)) return;
+
     const warning = document.createElement('div');
+    warning.id = warningId;
     warning.style.cssText = `
     position: fixed;
     bottom: 20px;
@@ -205,15 +209,26 @@ function showApiKeyWarning(): void {
     border-radius: 5px;
     z-index: 9999;
   `;
-    warning.innerHTML = `
-    TMDB API key required! 
-    <a href="${browser.runtime.getURL('options.html')}" 
-       style="color: white; text-decoration: underline;"
-       target="_blank">
-      Configure in extension settings
-    </a>
-  `;
+    warning.innerHTML = '<strong>TMDB API key required!</strong> Configure it in the extension settings.';
     document.body.appendChild(warning);
+
+    // Listen for changes to the API key in storage
+    browser.storage.onChanged.addListener(async (changes) => {
+        if (changes.tmdbApiKey && changes.tmdbApiKey.newValue) {
+            const existingWarning = document.getElementById(warningId);
+            if (existingWarning) {
+                existingWarning.remove();
+                logger.info('[showApiKeyWarning] Warning removed after API key was added.');
+            }
+
+            // Start filtering movies
+            const result = await browser.storage.local.get(['tmdbApiKey', 'selectedProviders', 'countryCode']);
+            const settings = result as ExtensionSettings;
+            const country = settings.countryCode || DEFAULT_COUNTRY;
+            const providers = settings.selectedProviders || DEFAULT_PROVIDERS;
+            new StreamFilter(settings.tmdbApiKey, providers, country).observePage();
+        }
+    });
 }
 
 logger.info('[ContentScript] Script loaded successfully');
