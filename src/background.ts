@@ -5,9 +5,14 @@ import { logger } from './utils/logger';
 let cachedCountries: TMDBRegion[] = [];
 
 export async function getCountries(): Promise<TMDBRegion[]> {
-    if (cachedCountries.length) return cachedCountries;
+    if (cachedCountries?.length) return cachedCountries;
 
     const result = await browser.storage.local.get('tmdbApiKey');
+    if (!result.tmdbApiKey) {
+        logger.warn('TMDB API key not set. Cannot fetch countries.');
+        return [];
+    }
+
     const tmdb = new TMDBClient(result.tmdbApiKey);
     cachedCountries = await tmdb.getAvailableCountries();
     return cachedCountries;

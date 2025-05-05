@@ -2,6 +2,7 @@ import { ExtensionSettings, TMDBRegion } from './types';
 import { logger } from './utils/logger';
 
 async function saveOptions() {
+    logger.info('Saving options...');
     const apiKey = (document.getElementById('apiKey') as HTMLInputElement).value.trim();
     const providerCheckboxes = document.querySelectorAll<HTMLInputElement>(
         'input[name="provider"]:checked'
@@ -17,6 +18,11 @@ async function saveOptions() {
     try {
         await browser.storage.local.set(settings);
         showStatus('Settings saved successfully!', 'success');
+
+        // Re-enable country selection and load countries if API key is set
+        if (apiKey) {
+            await loadCountries();
+        }
     } catch (error) {
         logger.error('Error saving settings:', error);
         showStatus('Failed to save settings', 'error');
@@ -43,11 +49,20 @@ async function loadOptions() {
 }
 
 async function loadCountries() {
+    const select = document.getElementById('country') as HTMLSelectElement;
+    const countryError = document.getElementById('country-error')!;
     try {
+        const { tmdbApiKey } = await browser.storage.local.get('tmdbApiKey');
+        if (!tmdbApiKey) {
+            select.disabled = true;
+            countryError.textContent = 'Set your TMDB API key to enable country selection.';
+            return;
+        }
+
         const response = await browser.runtime.sendMessage({ action: 'getCountries' });
         if (response.error) throw new Error(response.error);
+        logger.debug('Countries loaded:', response);
 
-        const select = document.getElementById('country') as HTMLSelectElement;
         select.innerHTML = response.map((c: TMDBRegion) =>
             `<option value="${c.iso_3166_1}">${c.english_name}</option>`
         ).join('');
@@ -55,9 +70,10 @@ async function loadCountries() {
         const saved = await browser.storage.local.get('countryCode');
         if (saved.countryCode) select.value = saved.countryCode;
         select.disabled = false;
+        countryError.textContent = '';
     } catch (error: any) {
         logger.error('Country load failed:', error);
-        document.getElementById('country-error')!.textContent = error.message;
+        countryError.textContent = error.message;
     }
 }
 
