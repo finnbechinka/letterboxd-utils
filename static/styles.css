@@ -87,7 +87,7 @@ select {
 }
 
 .unavailable-movie img {
-    filter: grayscale(100%);
+    filter: grayscale(75%);
 }
 
 /* Loading spinner for country select */

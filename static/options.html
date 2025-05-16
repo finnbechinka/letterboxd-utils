@@ -8,36 +8,42 @@
 </head>
 
 <body>
-  <h2>letterboxd utils</h2>
-  <div class="form-group">
-    <label for="apiKey">TMDB API Key:</label>
-    <input type="password" id="apiKey" placeholder="Enter your TMDB API key">
-  </div>
-  <div class="help-text">
-    Get your API key from <a href="https://www.themoviedb.org/settings/api" target="_blank">TMDB</a>
-  </div>
-  <div class="form-group">
-    <label>Streaming Providers:</label>
-    <div class="provider-options">
-      <label><input type="checkbox" name="provider" value="netflix"> Netflix</label>
-      <label><input type="checkbox" name="provider" value="hulu"> Hulu</label>
-      <label><input type="checkbox" name="provider" value="amazon"> Amazon Prime</label>
-      <label><input type="checkbox" name="provider" value="disney"> Disney+</label>
-      <label><input type="checkbox" name="provider" value="hbo"> HBO Max</label>
-      <label><input type="checkbox" name="provider" value="apple"> Apple TV+</label>
-      <label><input type="checkbox" name="provider" value="paramount"> Paramount+</label>
-      <label><input type="checkbox" name="provider" value="peacock"> Peacock</label>
+  <div class="options-container">
+    <h2>letterboxd utils</h2>
+    <div class="form-group">
+      <label for="apiKey">TMDB API Key:</label>
+      <input type="password" id="apiKey" placeholder="Enter your TMDB API key">
     </div>
+    <div class="form-group">
+      <label for="readApiKey">TMDB Read Token:</label>
+      <input type="password" id="readApiKey" placeholder="Enter your TMDB Read Token">
+    </div>
+    <div class="help-text">
+      Get your API keys from <a href="https://www.themoviedb.org/settings/api" target="_blank">TMDB</a>
+    </div>
+    <div class="form-group">
+      <label>Streaming Providers:</label>
+      <div class="provider-options">
+        <label><input type="checkbox" name="provider" value="netflix"> Netflix</label>
+        <label><input type="checkbox" name="provider" value="hulu"> Hulu</label>
+        <label><input type="checkbox" name="provider" value="amazon"> Amazon Prime</label>
+        <label><input type="checkbox" name="provider" value="disney"> Disney+</label>
+        <label><input type="checkbox" name="provider" value="hbo"> HBO Max</label>
+        <label><input type="checkbox" name="provider" value="apple"> Apple TV+</label>
+        <label><input type="checkbox" name="provider" value="paramount"> Paramount+</label>
+        <label><input type="checkbox" name="provider" value="peacock"> Peacock</label>
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="country">Country:</label>
+      <select id="country" class="form-control" disabled>
+        <option value="">Loading countries...</option>
+      </select>
+      <div id="country-error" class="error-message"></div>
+    </div>
+    <button id="save" class="btn-primary">Save Settings</button>
+    <div id="status" class="status-message"></div>
   </div>
-  <div class="form-group">
-    <label for="country">Country:</label>
-    <select id="country" class="form-control" disabled>
-      <option value="">Loading countries...</option>
-    </select>
-    <div id="country-error" class="error-message"></div>
-  </div>
-  <button id="save" class="btn-primary">Save Settings</button>
-  <div id="status" class="status-message"></div>
   <script src="./options.js" type="module"></script>
 </body>
 
