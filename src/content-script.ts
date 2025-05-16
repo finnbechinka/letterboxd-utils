@@ -3,16 +3,34 @@ import { TMDBClient } from './tmdb'
 import { ExtensionSettings } from './types'
 import { logger } from './utils/logger';
 
+const CACHE_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+type MovieCacheEntry = {
+    tmdbId?: number;
+    providers?: string[];
+    timestamp: number;
+};
+
+type MovieCache = { [key: string]: MovieCacheEntry };
+
+type MovieElementInfo = {
+    element: HTMLElement;
+    title: string;
+    year: string;
+    cacheKey: string;
+};
+
 class StreamFilter {
     private tmdb: TMDBClient;
     private targetProviders: Set<string>;
-    private cache = new Map<string, { value: boolean; timestamp: number }>();
+    private memoryCache = new Map<string, MovieCacheEntry>();
     private processedElements = new WeakSet<HTMLElement>();
     private debounceTimer: number | null = null;
+    private lastCallTime = 0;
 
-    constructor(apiKey: string, providers: string[], private countryCode: string) {
-        logger.info('Initializing StreamFilter with providers:', providers);
-        this.tmdb = new TMDBClient(apiKey);
+    constructor(apiKey: string, providers: string[], private countryCode: string, readApiKey?: string) {
+        logger.info(`[StreamFilter] Initializing with providers: ${providers}`);
+        this.tmdb = new TMDBClient(apiKey, readApiKey);
         this.targetProviders = new Set(providers.map(p => p.toLowerCase()));
     }
 
@@ -20,160 +38,196 @@ class StreamFilter {
         try {
             return await fn();
         } catch (error) {
+            logger.error(`[withRetry] Error: ${error}`);
             if (retries <= 0) throw error;
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            this.rateLimit();
             return this.withRetry(fn, retries - 1);
         }
     }
 
-    private getFromCache(key: string): boolean | null {
-        const entry = this.cache.get(key);
-        if (!entry) return null;
-        // 1 hour cache lifetime
-        if (Date.now() - entry.timestamp > 3600000) {
-            this.cache.delete(key);
+    private normalizeTitle(title: string): string {
+        // Remove extra whitespace, lowercase, remove punctuation
+        return title
+            .replace(/\s+/g, ' ')
+            .replace(/[^\w\s]/gi, '')
+            .trim()
+            .toLowerCase();
+    }
+
+    private getCacheKey(title: string, year: string): string {
+        // Use normalized title and year for cache key
+        return `${this.normalizeTitle(title || '')}-${year || ''}`;
+    }
+
+    private async getMovieCacheEntry(key: string): Promise<MovieCacheEntry | null> {
+        // Try memory cache first
+        const mem = this.memoryCache.get(key);
+        if (mem && Date.now() - mem.timestamp < CACHE_LIFETIME_MS) return mem;
+
+        // Load all cache from storage
+        const cacheObj = await browser.storage.local.get('movieCache');
+        const allCache: MovieCache = cacheObj.movieCache || {};
+        const entry = allCache[key];
+        if (entry && Date.now() - entry.timestamp < CACHE_LIFETIME_MS) {
+            this.memoryCache.set(key, entry);
+            return entry;
+        }
+        return null;
+    }
+
+    private async setMovieCache(key: string, entry: MovieCacheEntry): Promise<void> {
+        this.memoryCache.set(key, entry);
+        // Update the cache object in storage
+        const cacheObj = await browser.storage.local.get('movieCache');
+        const allCache: MovieCache = cacheObj.movieCache || {};
+        allCache[key] = entry;
+        await browser.storage.local.set({ movieCache: allCache });
+    }
+
+    private getMovieElementInfo(element: HTMLElement): MovieElementInfo | null {
+        const titleElement = element.querySelector('.frame-title');
+        if (!titleElement){
+            logger.warn(`[getMovieElementInfo] No title element found in ${element}`);
             return null;
         }
-        return entry.value;
-    }
-
-    private setCache(key: string, value: boolean): void {
-        this.cache.set(key, {
-            value,
-            timestamp: Date.now()
-        });
-    }
-
-    private hasCache(key: string): boolean {
-        return this.cache.has(key);
-    }
-
-    async processMovie(element: HTMLElement): Promise<void> {
-        logger.info('[processMovie] Processing movie element:', element);
-
-        const titleElement = element.querySelector('.frame-title');
-
-        if (!titleElement) {
-            logger.warn('[processMovie] No title element found, skipping');
-            return;
-        }
-
-        const title = titleElement.textContent?.trim();
-        // Get year from the frame-title (format: "Title (YEAR)")
-        const yearMatch = element.querySelector('.frame-title')?.textContent?.match(/\((\d{4})\)/);
+        let title = titleElement.textContent?.trim() || '';
+        const yearMatch = title.match(/\((\d{4})\)/);
         const year = yearMatch ? yearMatch[1] : '';
-        const cacheKey = `${title}-${year}`;
-
-        logger.info(`[processMovie] Extracted movie: ${title} (${year || 'no year'})`);
-
-        if (this.hasCache(cacheKey)) {
-            const isAvailable = this.getFromCache(cacheKey)!;
-            logger.info(`[processMovie] Cache hit - Available: ${isAvailable}`);
-            this.updateElement(element, isAvailable);
-            return;
+        if (yearMatch) {
+            title = title.replace(yearMatch[0], '').trim();
         }
+        const cacheKey = this.getCacheKey(title, year);
+        return { element, title, year, cacheKey };
+    }
 
+    private async processMovieWithTMDB(info: MovieElementInfo): Promise<void> {
         try {
-            logger.info('[processMovie] Starting TMDB search...');
             const movie = await this.withRetry(() =>
-                this.tmdb.searchMovie(title!, year ? parseInt(year) : undefined)
+                this.tmdb.searchMovie(info.title, info.year ? parseInt(info.year) : undefined)
             );
-
             if (!movie) {
-                logger.warn('[processMovie] Movie not found in TMDB', title);
-                this.setCache(cacheKey, false);
-                this.updateElement(element, false);
+                await this.setMovieCache(info.cacheKey, { timestamp: Date.now(), providers: [] });
+                this.updateElement(info.element, false);
                 return;
             }
-
-            logger.info(`[processMovie] Found TMDB ID: ${movie.id}, now checking providers...`);
             const providers = await this.withRetry(() =>
                 this.tmdb.getStreamingProviders(movie.id, this.countryCode)
             );
-            logger.info('[processMovie] Available providers:', providers);
-
+            await this.setMovieCache(info.cacheKey, {
+                tmdbId: movie.id,
+                providers,
+                timestamp: Date.now()
+            });
             const hasProvider = providers.some(p => this.targetProviders.has(p));
-            logger.info(`[processMovie] Has target provider: ${hasProvider}`);
-
-            this.setCache(cacheKey, hasProvider);
-            this.updateElement(element, hasProvider);
+            this.updateElement(info.element, hasProvider);
         } catch (error) {
-            logger.error('[processMovie] Error processing movie:', error);
-            this.setCache(cacheKey, false);
-            this.updateElement(element, false);
+            await this.setMovieCache(info.cacheKey, { timestamp: Date.now(), providers: [] });
+            this.updateElement(info.element, false);
         }
     }
 
-    private updateElement(element: HTMLElement, isAvailable: boolean): void {
-        logger.info(`[updateElement] Setting availability: ${isAvailable}`);
-        element.classList.toggle('unavailable-movie', !isAvailable);
+    private async processMovieWithExpiredCache(info: MovieElementInfo): Promise<void> {
+        // Same as processMovieWithTMDB, but can be separated for clarity if needed
+        await this.processMovieWithTMDB(info);
     }
 
-    public observePage(): void {
-        const observer = new MutationObserver((mutations: MutationRecord[]) => {
-            if (this.debounceTimer) clearTimeout(this.debounceTimer);
-            this.debounceTimer = setTimeout(() => {
-                if (this.shouldProcessMutation(mutations)) {
-                    const newElements = this.findNewFilmElements(mutations);
-                    if (newElements.length) {
-                        console.log(`Processing ${newElements.length} new films`);
-                        newElements.forEach(el => this.processMovie(el));
-                    }
-                }
-            }, 500);
-            if (!this.shouldProcessMutation(mutations)) return;
+    private isCacheExpired(entry: MovieCacheEntry): boolean {
+        return Date.now() - entry.timestamp >= CACHE_LIFETIME_MS;
+    }
 
-            const newElements = this.findNewFilmElements(mutations);
-            if (newElements.length > 0) {
-                logger.info(`Found ${newElements.length} new films to process`);
-                newElements.forEach((el: HTMLElement) => this.processMovie(el));
+    private async processAllMovies(elements: HTMLElement[]): Promise<void> {
+        // 1. Gather info for all movie elements
+        const infos: MovieElementInfo[] = [];
+        for (const el of elements) {
+            if (this.processedElements.has(el)) continue;
+            const info = this.getMovieElementInfo(el);
+            if (!info?.title) continue;
+            if (info) infos.push(info);
+        }
+
+        // 2. Check cache for all movies
+        const uncached: MovieElementInfo[] = [];
+        const expired: MovieElementInfo[] = [];
+        for (const info of infos) {
+            const cached = await this.getMovieCacheEntry(info.cacheKey);
+            if (cached && cached.providers) {
+                if (this.isCacheExpired(cached)) {
+                    expired.push(info);
+                } else {
+                    const hasProvider = cached.providers.some(p => this.targetProviders.has(p));
+                    // Only update class if unavailable
+                    if (!hasProvider) {
+                        this.updateElement(info.element, false);
+                    } else {
+                        this.updateElement(info.element, true);
+                    }
+                    this.processedElements.add(info.element);
+                }
+            } else {
+                uncached.push(info);
             }
+        }
+
+        // 3. Process uncached movies (rate-limited, minimal delay)
+        for (const info of uncached) {
+            await this.processMovieWithTMDB(info);
+            this.processedElements.add(info.element);
+            await this.rateLimit();
+        }
+
+        // 4. Process expired cache movies (rate-limited, after uncached)
+        for (const info of expired) {
+            await this.processMovieWithExpiredCache(info);
+            this.processedElements.add(info.element);
+            await this.rateLimit();
+        }
+    }
+
+    private async rateLimit(): Promise<void> {
+        const now = Date.now();
+        const delay = Math.max(0, 1000 - (now - this.lastCallTime)); // 1 requests/second
+        if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+        this.lastCallTime = Date.now();
+    }
+
+    public async observePage(): Promise<void> {
+        // Initial processing
+        const initialElements = Array.from(document.querySelectorAll<HTMLElement>(
+            '.film-poster'
+        ));
+        await this.processAllMovies(initialElements);
+
+        // Debounced mutation observer
+        const processMutations = async () => {
+            const newElements = Array.from(document.querySelectorAll<HTMLElement>(
+                '.film-poster'
+            )).filter(el => !this.processedElements.has(el));
+            if (newElements.length > 0) {
+                await this.processAllMovies(newElements);
+            }
+        };
+
+        const observer = new MutationObserver(() => {
+            if (this.debounceTimer) clearTimeout(this.debounceTimer);
+            this.debounceTimer = window.setTimeout(() => {
+                processMutations();
+            }, 400);
         });
 
         observer.observe(document.body, {
             childList: true,
             subtree: true,
-            attributeFilter: ['class']
+            attributes: false
         });
-
-        // Process initial load
-        const initialElements = document.querySelectorAll<HTMLElement>(
-            '.film-poster, [class*="film-poster-"]'
-        );
-        initialElements.forEach(el => this.processMovie(el));
     }
 
-    private findNewFilmElements(mutations: MutationRecord[]): HTMLElement[] {
-        return mutations.reduce((elements: HTMLElement[], mutation) => {
-            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                Array.from(mutation.addedNodes).forEach(node => {
-                    if (node instanceof HTMLElement) {
-                        // Add the node itself if it's a film element
-                        if (node.classList.contains('film-poster') ||
-                            Array.from(node.classList).some(cls => cls.includes('film-poster-'))) {
-                            elements.push(node);
-                        }
-                        // Add any child film elements
-                        const childElements = Array.from(
-                            node.querySelectorAll<HTMLElement>('.film-poster, [class*="film-poster-"]')
-                        );
-                        elements.push(...childElements);
-                    }
-                });
-            }
-            return elements;
-        }, []).filter(el => !this.processedElements.has(el));
-    }
-
-    private shouldProcessMutation(mutations: MutationRecord[]): boolean {
-        return mutations.some(mutation =>
-            mutation.type === 'childList' && mutation.addedNodes.length > 0
-        );
+    private updateElement(element: HTMLElement, isAvailable: boolean): void {
+        element.classList.toggle('unavailable-movie', !isAvailable);
     }
 }
 
 logger.info('[ContentScript] Initializing extension...');
-browser.storage.local.get(['tmdbApiKey', 'selectedProviders', 'countryCode'])
+browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'countryCode'])
     .then((result: { [key: string]: any }) => {
         const settings = result as ExtensionSettings;
         if (!settings.tmdbApiKey) {
@@ -183,10 +237,10 @@ browser.storage.local.get(['tmdbApiKey', 'selectedProviders', 'countryCode'])
 
         const country = result.countryCode || DEFAULT_COUNTRY;
         const providers = settings.selectedProviders || DEFAULT_PROVIDERS;
-        new StreamFilter(settings.tmdbApiKey, providers, country).observePage();
+        new StreamFilter(settings.tmdbApiKey, providers, country, settings.tmdbReadApiKey).observePage();
     })
     .catch(error => {
-        logger.error('Error loading settings:', error);
+        logger.error(`[ContentScript] Error loading settings: ${error}`);
         new StreamFilter('', DEFAULT_PROVIDERS, DEFAULT_COUNTRY).observePage();
     });
 
@@ -194,7 +248,6 @@ function showApiKeyWarning(): void {
     logger.info('[showApiKeyWarning] Displaying warning to user');
     const warningId = 'api-key-warning';
 
-    // Check if the warning already exists
     if (document.getElementById(warningId)) return;
 
     const warning = document.createElement('div');
@@ -212,7 +265,6 @@ function showApiKeyWarning(): void {
     warning.innerHTML = '<strong>TMDB API key required!</strong> Configure it in the extension settings.';
     document.body.appendChild(warning);
 
-    // Listen for changes to the API key in storage
     browser.storage.onChanged.addListener(async (changes) => {
         if (changes.tmdbApiKey && changes.tmdbApiKey.newValue) {
             const existingWarning = document.getElementById(warningId);
@@ -221,12 +273,11 @@ function showApiKeyWarning(): void {
                 logger.info('[showApiKeyWarning] Warning removed after API key was added.');
             }
 
-            // Start filtering movies
-            const result = await browser.storage.local.get(['tmdbApiKey', 'selectedProviders', 'countryCode']);
+            const result = await browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'countryCode']);
             const settings = result as ExtensionSettings;
             const country = settings.countryCode || DEFAULT_COUNTRY;
             const providers = settings.selectedProviders || DEFAULT_PROVIDERS;
-            new StreamFilter(settings.tmdbApiKey, providers, country).observePage();
+            new StreamFilter(settings.tmdbApiKey, providers, country, settings.tmdbReadApiKey).observePage();
         }
     });
 }

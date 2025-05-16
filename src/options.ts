@@ -1,9 +1,13 @@
+import { DEFAULT_COUNTRY } from './constants';
 import { ExtensionSettings, TMDBRegion } from './types';
 import { logger } from './utils/logger';
 
 async function saveOptions() {
-    logger.info('Saving options...');
+    const saveBtn = document.getElementById('save') as HTMLButtonElement;
+    logger.info(`[Options] Saving options...`);
+    saveBtn.disabled = true;
     const apiKey = (document.getElementById('apiKey') as HTMLInputElement).value.trim();
+    const readApiKey = (document.getElementById('readApiKey') as HTMLInputElement).value.trim();
     const providerCheckboxes = document.querySelectorAll<HTMLInputElement>(
         'input[name="provider"]:checked'
     );
@@ -11,6 +15,7 @@ async function saveOptions() {
 
     const settings: ExtensionSettings = {
         tmdbApiKey: apiKey,
+        tmdbReadApiKey: readApiKey,
         selectedProviders: Array.from(providerCheckboxes).map(cb => cb.value),
         countryCode: countryCode
     };
@@ -20,21 +25,26 @@ async function saveOptions() {
         showStatus('Settings saved successfully!', 'success');
 
         // Re-enable country selection and load countries if API key is set
-        if (apiKey) {
+        if (apiKey && readApiKey) {
             await loadCountries();
         }
     } catch (error) {
-        logger.error('Error saving settings:', error);
+        logger.error(`[Options] Error saving settings: ${error}`);
         showStatus('Failed to save settings', 'error');
+    } finally {
+        saveBtn.disabled = false;
     }
 }
 
 async function loadOptions() {
     try {
-        const result = await browser.storage.local.get(['tmdbApiKey', 'selectedProviders']);
+        const result = await browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders']);
 
         if (result.tmdbApiKey) {
             (document.getElementById('apiKey') as HTMLInputElement).value = result.tmdbApiKey;
+        }
+        if (result.tmdbReadApiKey) {
+            (document.getElementById('readApiKey') as HTMLInputElement).value = result.tmdbReadApiKey;
         }
 
         if (result.selectedProviders) {
@@ -44,24 +54,26 @@ async function loadOptions() {
             });
         }
     } catch (error) {
-        logger.error('Error loading settings:', error);
+        logger.error(`[Options] Error loading settings: ${error}`);
     }
 }
 
 async function loadCountries() {
     const select = document.getElementById('country') as HTMLSelectElement;
     const countryError = document.getElementById('country-error')!;
+    select.disabled = true;
+    select.innerHTML = `<option value="">Loading countries...</option>`;
     try {
-        const { tmdbApiKey } = await browser.storage.local.get('tmdbApiKey');
-        if (!tmdbApiKey) {
+        const { tmdbApiKey, tmdbReadApiKey } = await browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey']);
+        if (!tmdbApiKey || !tmdbReadApiKey) {
             select.disabled = true;
-            countryError.textContent = 'Set your TMDB API key to enable country selection.';
+            countryError.textContent = 'Set both TMDB API keys to enable country selection.';
             return;
         }
 
         const response = await browser.runtime.sendMessage({ action: 'getCountries' });
         if (response.error) throw new Error(response.error);
-        logger.debug('Countries loaded:', response);
+        logger.debug(`[Options] Countries loaded: ${JSON.stringify(response)}`);
 
         select.innerHTML = response.map((c: TMDBRegion) =>
             `<option value="${c.iso_3166_1}">${c.english_name}</option>`
@@ -69,10 +81,11 @@ async function loadCountries() {
 
         const saved = await browser.storage.local.get('countryCode');
         if (saved.countryCode) select.value = saved.countryCode;
+        if (!saved.countryCode) select.value = DEFAULT_COUNTRY;
         select.disabled = false;
         countryError.textContent = '';
     } catch (error: any) {
-        logger.error('Country load failed:', error);
+        logger.error(`[Options] Country load failed: ${error}`);
         countryError.textContent = error.message;
     }
 }

@@ -3,6 +3,7 @@
  */
 export interface ExtensionSettings {
     tmdbApiKey: string;
+    tmdbReadApiKey?: string;
     selectedProviders?: string[];
     countryCode?: string;
 }

@@ -5,12 +5,14 @@ export class TMDBClient {
     private readonly baseUrl = 'https://api.themoviedb.org/3';
     private readonly headers: HeadersInit;
     private lastCallTime = 0;
+    private readonly readApiKey: string;
 
-    constructor(private apiKey: string) {
+    constructor(private apiKey: string, readApiKey?: string) {
         this.headers = {
-            'Authorization': `Bearer ${apiKey}`,
+            'Authorization': `Bearer ${readApiKey}`,
             'accept': 'application/json'
         };
+        this.readApiKey = readApiKey || '';
     }
 
     async searchMovie(title: string, year?: number): Promise<TMDBMovieSearchResult | null> {
@@ -38,6 +40,7 @@ export class TMDBClient {
     }
 
     async getAvailableCountries(): Promise<TMDBRegion[]> {
+        // Use the read API key (v3) for this endpoint
         const response = await fetch(
             `${this.baseUrl}/watch/providers/regions?api_key=${this.apiKey}`
         );
