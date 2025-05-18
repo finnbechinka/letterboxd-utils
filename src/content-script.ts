@@ -86,7 +86,7 @@ class StreamFilter {
 
     private getMovieElementInfo(element: HTMLElement): MovieElementInfo | null {
         const titleElement = element.querySelector('.frame-title');
-        if (!titleElement){
+        if (!titleElement) {
             logger.warn(`[getMovieElementInfo] No title element found in ${element}`);
             return null;
         }
@@ -153,16 +153,14 @@ class StreamFilter {
             if (cached && cached.providers) {
                 if (this.isCacheExpired(cached)) {
                     expired.push(info);
-                } else {
-                    const hasProvider = cached.providers.some(p => this.targetProviders.has(p));
-                    // Only update class if unavailable
-                    if (!hasProvider) {
-                        this.updateElement(info.element, false);
-                    } else {
-                        this.updateElement(info.element, true);
-                    }
-                    this.processedElements.add(info.element);
                 }
+                const hasProvider = cached.providers.some(p => this.targetProviders.has(p));
+                if (!hasProvider) {
+                    this.updateElement(info.element, false);
+                } else {
+                    this.updateElement(info.element, true);
+                }
+                this.processedElements.add(info.element);
             } else {
                 uncached.push(info);
             }
