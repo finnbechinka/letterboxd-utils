@@ -26,7 +26,6 @@ class StreamFilter {
     private memoryCache = new Map<string, MovieCacheEntry>();
     private processedElements = new WeakSet<HTMLElement>();
     private debounceTimer: number | null = null;
-    private lastCallTime = 0;
 
     constructor(apiKey: string, providers: string[], private countryCode: string, readApiKey?: string) {
         logger.info(`[StreamFilter] Initializing with providers: ${providers}`);
@@ -37,10 +36,11 @@ class StreamFilter {
     private async withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
         try {
             return await fn();
-        } catch (error) {
+        } catch (error: any) {
             logger.error(`[withRetry] Error: ${error}`);
+            // If 429, let TMDBClient handle RPS reduction
             if (retries <= 0) throw error;
-            this.rateLimit();
+            // No local rate limit, just retry
             return this.withRetry(fn, retries - 1);
         }
     }
@@ -170,22 +170,15 @@ class StreamFilter {
         for (const info of uncached) {
             await this.processMovieWithTMDB(info);
             this.processedElements.add(info.element);
-            await this.rateLimit();
+            // No local rate limit
         }
 
         // 4. Process expired cache movies (rate-limited, after uncached)
         for (const info of expired) {
             await this.processMovieWithExpiredCache(info);
             this.processedElements.add(info.element);
-            await this.rateLimit();
+            // No local rate limit
         }
-    }
-
-    private async rateLimit(): Promise<void> {
-        const now = Date.now();
-        const delay = Math.max(0, 1000 - (now - this.lastCallTime)); // 1 requests/second
-        if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
-        this.lastCallTime = Date.now();
     }
 
     public async observePage(): Promise<void> {
