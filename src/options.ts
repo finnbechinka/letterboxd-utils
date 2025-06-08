@@ -13,13 +13,15 @@ async function saveOptions() {
     );
     const countryCode = (document.getElementById('country') as HTMLSelectElement).value;
     const opacity = parseFloat((document.getElementById('opacity') as HTMLInputElement).value);
+    const fadeToggle = (document.getElementById('fadeToggle') as HTMLInputElement).checked;
 
     const settings: ExtensionSettings = {
         tmdbApiKey: apiKey,
         tmdbReadApiKey: readApiKey,
         selectedProviders: Array.from(providerCheckboxes).map(cb => cb.value),
         countryCode: countryCode,
-        unavailableOpacity: opacity
+        unavailableOpacity: opacity,
+        fadeUnavailable: fadeToggle
     };
 
     try {
@@ -40,7 +42,7 @@ async function saveOptions() {
 
 async function loadOptions() {
     try {
-        const result = await browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'unavailableOpacity']);
+        const result = await browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'unavailableOpacity', 'fadeUnavailable']);
 
         if (result.tmdbApiKey) {
             (document.getElementById('apiKey') as HTMLInputElement).value = result.tmdbApiKey;
@@ -56,11 +58,19 @@ async function loadOptions() {
             });
         }
         if (typeof result.unavailableOpacity === 'number') {
-            (document.getElementById('opacity') as HTMLInputElement).value = result.unavailableOpacity.toString();
+            const opacityInput = document.getElementById('opacity') as HTMLInputElement;
+            opacityInput.disabled = result.fadeUnavailable === false;
+            opacityInput.value = result.unavailableOpacity.toString();
             (document.getElementById('opacity-value') as HTMLElement).textContent = result.unavailableOpacity.toString();
-            setUnavailableOpacityCSS(result.unavailableOpacity);
+            setUnavailableOpacityCSS(result.fadeUnavailable === false ? 1 : result.unavailableOpacity);
         } else {
-            setUnavailableOpacityCSS(0.4);
+            setUnavailableOpacityCSS(result.fadeUnavailable === false ? 1 : 0.4);
+        }
+
+        if (typeof result.fadeUnavailable === 'boolean') {
+            (document.getElementById('fadeToggle') as HTMLInputElement).checked = result.fadeUnavailable;
+        } else {
+            (document.getElementById('fadeToggle') as HTMLInputElement).checked = true;
         }
     } catch (error) {
         logger.error(`[Options] Error loading settings: ${error}`);
@@ -122,6 +132,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         opacityInput.addEventListener('input', () => {
             opacityValue.textContent = opacityInput.value;
             setUnavailableOpacityCSS(parseFloat(opacityInput.value));
+        });
+    }
+
+    // Fade toggle event
+    const fadeToggle = document.getElementById('fadeToggle') as HTMLInputElement;
+    if (fadeToggle) {
+        fadeToggle.addEventListener('change', () => {
+            opacityInput.disabled = !fadeToggle.checked;
+            setUnavailableOpacityCSS(fadeToggle.checked ? parseFloat(opacityInput.value) : 1);
         });
     }
 });
