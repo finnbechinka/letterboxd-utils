@@ -4,6 +4,7 @@
     --success-color: #388E3C;
     --border-color: #ddd;
     --hover-bg: #f5f5f5;
+    --unavailable-movie-opacity: 0.4;
 }
 
 .form-group {
@@ -81,7 +82,7 @@ select {
 }
 
 .unavailable-movie {
-    opacity: 0.3;
+    opacity: var(--unavailable-movie-opacity);
     transition: opacity 0.3s ease;
     position: relative;
 }
