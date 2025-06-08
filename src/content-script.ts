@@ -252,37 +252,131 @@ function setUnavailableOpacityCSS(value: number) {
     document.documentElement.style.setProperty('--unavailable-movie-opacity', value.toString());
 }
 
-// Listen for changes to unavailableOpacity and update CSS variable immediately
+// Listen for changes to unavailableOpacity and fadeUnavailable and update CSS variable immediately
 browser.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.unavailableOpacity) {
-        const newValue = changes.unavailableOpacity.newValue;
-        if (typeof newValue === 'number') {
-            setUnavailableOpacityCSS(newValue);
+    if (area === 'local') {
+        let fade = true;
+        let opacity = 0.4;
+        if (changes.fadeUnavailable) {
+            fade = changes.fadeUnavailable.newValue !== false;
+        }
+        if (changes.unavailableOpacity) {
+            opacity = typeof changes.unavailableOpacity.newValue === 'number'
+                ? changes.unavailableOpacity.newValue
+                : 0.4;
+        }
+        // If fadeUnavailable is present, use it; otherwise, get current from storage
+        if ('fadeUnavailable' in changes) {
+            setUnavailableOpacityCSS(fade ? opacity : 1);
+        } else if ('unavailableOpacity' in changes) {
+            browser.storage.local.get('fadeUnavailable').then(res => {
+                setUnavailableOpacityCSS(res.fadeUnavailable === false ? 1 : opacity);
+            });
         }
     }
 });
 
 logger.info('[ContentScript] Initializing extension...');
-browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'countryCode', 'unavailableOpacity'])
+browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'countryCode', 'unavailableOpacity', 'fadeUnavailable'])
     .then((result: { [key: string]: any }) => {
         const settings = result as ExtensionSettings;
-        if (typeof settings.unavailableOpacity === 'number') {
-            setUnavailableOpacityCSS(settings.unavailableOpacity);
-        } else {
-            setUnavailableOpacityCSS(0.4);
-        }
+        const fade = settings.fadeUnavailable !== false;
+        const opacity = typeof settings.unavailableOpacity === 'number' ? settings.unavailableOpacity : 0.4;
+        setUnavailableOpacityCSS(fade ? opacity : 1);
         if (!settings.tmdbApiKey) {
             showApiKeyWarning();
+            addFadeToggleToNav();
             return;
         }
 
         const country = result.countryCode || DEFAULT_COUNTRY;
         const providers = settings.selectedProviders || DEFAULT_PROVIDERS;
         new StreamFilter(settings.tmdbApiKey, providers, country, settings.tmdbReadApiKey).observePage();
+        addFadeToggleToNav();
     })
     .catch(error => {
         logger.error(`[ContentScript] Error loading settings: ${error}`);
         setUnavailableOpacityCSS(0.4);
         new StreamFilter('', DEFAULT_PROVIDERS, DEFAULT_COUNTRY).observePage();
+        addFadeToggleToNav();
     });
 logger.info('[ContentScript] Script loaded successfully');
+
+// Add a toggle button to the nav bar for fading unavailable movies
+function addFadeToggleToNav() {
+    const tryInsert = () => {
+        const nav = document.querySelector('ul.navitems');
+        if (!nav) {
+            setTimeout(tryInsert, 500);
+            return;
+        }
+        // Avoid duplicate insertion
+        if (nav.querySelector('.fade-toggle-navitem')) return;
+
+        // Create nav item
+        const li = document.createElement('li');
+        li.className = 'navitem fade-toggle-navitem main-nav-fade';
+        li.style.display = '';
+
+        // Create navlink-style button
+        const btn = document.createElement('a');
+        btn.href = '#';
+        btn.className = 'navlink has-icon';
+        btn.style.display = 'flex';
+        btn.style.alignItems = 'center';
+        btn.style.gap = '4px';
+
+        // Add label
+        const label = document.createElement('span');
+        label.className = 'label';
+        label.style.fontSize = '13px';
+
+        // Set initial state from storage
+        browser.storage.local.get(['fadeUnavailable', 'unavailableOpacity']).then(res => {
+            const fade = res.fadeUnavailable !== false;
+            const opacity = typeof res.unavailableOpacity === 'number' ? res.unavailableOpacity : 0.4;
+            label.textContent = fade ? 'Fading: ON' : 'Fading: OFF';
+            btn.setAttribute('aria-pressed', fade ? 'true' : 'false');
+            setUnavailableOpacityCSS(fade ? opacity : 1);
+        });
+
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            browser.storage.local.get(['fadeUnavailable', 'unavailableOpacity']).then(res => {
+                const fade = res.fadeUnavailable !== false;
+                const newFade = !fade;
+                const opacity = typeof res.unavailableOpacity === 'number' ? res.unavailableOpacity : 0.4;
+                browser.storage.local.set({ fadeUnavailable: newFade }).then(() => {
+                    setUnavailableOpacityCSS(newFade ? opacity : 1);
+                });
+            });
+        });
+
+        btn.appendChild(label);
+        li.appendChild(btn);
+
+        // Insert after Activity nav item
+        const activityNav = nav.querySelector('.main-nav-activity');
+        if (activityNav && activityNav.nextSibling) {
+            nav.insertBefore(li, activityNav.nextSibling);
+        } else if (activityNav) {
+            nav.appendChild(li);
+        } else {
+            nav.appendChild(li);
+        }
+
+        // Update button if fadeUnavailable changes elsewhere (including from options page)
+        browser.storage.onChanged.addListener((changes, area) => {
+            if (area === 'local' && btn.isConnected && (changes.fadeUnavailable || changes.unavailableOpacity)) {
+                browser.storage.local.get(['fadeUnavailable', 'unavailableOpacity']).then(res => {
+                    const fade = res.fadeUnavailable !== false;
+                    const opacity = typeof res.unavailableOpacity === 'number' ? res.unavailableOpacity : 0.4;
+                    label.textContent = fade ? 'Fading: ON' : 'Fading: OFF';
+                    btn.setAttribute('aria-pressed', fade ? 'true' : 'false');
+                    setUnavailableOpacityCSS(fade ? opacity : 1);
+                });
+            }
+        });
+    };
+    tryInsert();
+}

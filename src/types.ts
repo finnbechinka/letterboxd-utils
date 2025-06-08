@@ -7,6 +7,7 @@ export interface ExtensionSettings {
     selectedProviders?: string[];
     countryCode?: string;
     unavailableOpacity?: number;
+    fadeUnavailable?: boolean;
 }
 
 /**
