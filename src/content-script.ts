@@ -62,13 +62,13 @@ class StreamFilter {
     private async getMovieCacheEntry(key: string): Promise<MovieCacheEntry | null> {
         // Try memory cache first
         const mem = this.memoryCache.get(key);
-        if (mem && Date.now() - mem.timestamp < CACHE_LIFETIME_MS) return mem;
+        if (mem) return mem;
 
         // Load all cache from storage
         const cacheObj = await browser.storage.local.get('movieCache');
         const allCache: MovieCache = cacheObj.movieCache || {};
         const entry = allCache[key];
-        if (entry && Date.now() - entry.timestamp < CACHE_LIFETIME_MS) {
+        if (entry) {
             this.memoryCache.set(key, entry);
             return entry;
         }
@@ -126,11 +126,6 @@ class StreamFilter {
         }
     }
 
-    private async processMovieWithExpiredCache(info: MovieElementInfo): Promise<void> {
-        // Same as processMovieWithTMDB, but can be separated for clarity if needed
-        await this.processMovieWithTMDB(info);
-    }
-
     private isCacheExpired(entry: MovieCacheEntry): boolean {
         return Date.now() - entry.timestamp >= CACHE_LIFETIME_MS;
     }
@@ -170,14 +165,12 @@ class StreamFilter {
         for (const info of uncached) {
             await this.processMovieWithTMDB(info);
             this.processedElements.add(info.element);
-            // No local rate limit
         }
 
         // 4. Process expired cache movies (rate-limited, after uncached)
         for (const info of expired) {
-            await this.processMovieWithExpiredCache(info);
+            await this.processMovieWithTMDB(info);
             this.processedElements.add(info.element);
-            // No local rate limit
         }
     }
 
@@ -217,24 +210,6 @@ class StreamFilter {
     }
 }
 
-logger.info('[ContentScript] Initializing extension...');
-browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'countryCode'])
-    .then((result: { [key: string]: any }) => {
-        const settings = result as ExtensionSettings;
-        if (!settings.tmdbApiKey) {
-            showApiKeyWarning();
-            return;
-        }
-
-        const country = result.countryCode || DEFAULT_COUNTRY;
-        const providers = settings.selectedProviders || DEFAULT_PROVIDERS;
-        new StreamFilter(settings.tmdbApiKey, providers, country, settings.tmdbReadApiKey).observePage();
-    })
-    .catch(error => {
-        logger.error(`[ContentScript] Error loading settings: ${error}`);
-        new StreamFilter('', DEFAULT_PROVIDERS, DEFAULT_COUNTRY).observePage();
-    });
-
 function showApiKeyWarning(): void {
     logger.info('[showApiKeyWarning] Displaying warning to user');
     const warningId = 'api-key-warning';
@@ -273,4 +248,21 @@ function showApiKeyWarning(): void {
     });
 }
 
+logger.info('[ContentScript] Initializing extension...');
+browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'countryCode'])
+    .then((result: { [key: string]: any }) => {
+        const settings = result as ExtensionSettings;
+        if (!settings.tmdbApiKey) {
+            showApiKeyWarning();
+            return;
+        }
+
+        const country = result.countryCode || DEFAULT_COUNTRY;
+        const providers = settings.selectedProviders || DEFAULT_PROVIDERS;
+        new StreamFilter(settings.tmdbApiKey, providers, country, settings.tmdbReadApiKey).observePage();
+    })
+    .catch(error => {
+        logger.error(`[ContentScript] Error loading settings: ${error}`);
+        new StreamFilter('', DEFAULT_PROVIDERS, DEFAULT_COUNTRY).observePage();
+    });
 logger.info('[ContentScript] Script loaded successfully');
