@@ -248,10 +248,29 @@ function showApiKeyWarning(): void {
     });
 }
 
+function setUnavailableOpacityCSS(value: number) {
+    document.documentElement.style.setProperty('--unavailable-movie-opacity', value.toString());
+}
+
+// Listen for changes to unavailableOpacity and update CSS variable immediately
+browser.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.unavailableOpacity) {
+        const newValue = changes.unavailableOpacity.newValue;
+        if (typeof newValue === 'number') {
+            setUnavailableOpacityCSS(newValue);
+        }
+    }
+});
+
 logger.info('[ContentScript] Initializing extension...');
-browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'countryCode'])
+browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'countryCode', 'unavailableOpacity'])
     .then((result: { [key: string]: any }) => {
         const settings = result as ExtensionSettings;
+        if (typeof settings.unavailableOpacity === 'number') {
+            setUnavailableOpacityCSS(settings.unavailableOpacity);
+        } else {
+            setUnavailableOpacityCSS(0.4);
+        }
         if (!settings.tmdbApiKey) {
             showApiKeyWarning();
             return;
@@ -263,6 +282,7 @@ browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 
     })
     .catch(error => {
         logger.error(`[ContentScript] Error loading settings: ${error}`);
+        setUnavailableOpacityCSS(0.4);
         new StreamFilter('', DEFAULT_PROVIDERS, DEFAULT_COUNTRY).observePage();
     });
 logger.info('[ContentScript] Script loaded successfully');

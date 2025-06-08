@@ -12,12 +12,14 @@ async function saveOptions() {
         'input[name="provider"]:checked'
     );
     const countryCode = (document.getElementById('country') as HTMLSelectElement).value;
+    const opacity = parseFloat((document.getElementById('opacity') as HTMLInputElement).value);
 
     const settings: ExtensionSettings = {
         tmdbApiKey: apiKey,
         tmdbReadApiKey: readApiKey,
         selectedProviders: Array.from(providerCheckboxes).map(cb => cb.value),
-        countryCode: countryCode
+        countryCode: countryCode,
+        unavailableOpacity: opacity
     };
 
     try {
@@ -38,7 +40,7 @@ async function saveOptions() {
 
 async function loadOptions() {
     try {
-        const result = await browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders']);
+        const result = await browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'unavailableOpacity']);
 
         if (result.tmdbApiKey) {
             (document.getElementById('apiKey') as HTMLInputElement).value = result.tmdbApiKey;
@@ -53,9 +55,21 @@ async function loadOptions() {
                 checkbox.checked = result.selectedProviders.includes(checkbox.value);
             });
         }
+        if (typeof result.unavailableOpacity === 'number') {
+            (document.getElementById('opacity') as HTMLInputElement).value = result.unavailableOpacity.toString();
+            (document.getElementById('opacity-value') as HTMLElement).textContent = result.unavailableOpacity.toString();
+            setUnavailableOpacityCSS(result.unavailableOpacity);
+        } else {
+            setUnavailableOpacityCSS(0.4);
+        }
     } catch (error) {
         logger.error(`[Options] Error loading settings: ${error}`);
     }
+}
+
+// Set the CSS variable for opacity
+function setUnavailableOpacityCSS(value: number) {
+    document.documentElement.style.setProperty('--unavailable-movie-opacity', value.toString());
 }
 
 async function loadCountries() {
@@ -100,6 +114,16 @@ function showStatus(message: string, type: 'success' | 'error') {
 document.addEventListener('DOMContentLoaded', async () => {
     await loadOptions();
     await loadCountries();
+
+    // Opacity slider event
+    const opacityInput = document.getElementById('opacity') as HTMLInputElement;
+    const opacityValue = document.getElementById('opacity-value') as HTMLElement;
+    if (opacityInput && opacityValue) {
+        opacityInput.addEventListener('input', () => {
+            opacityValue.textContent = opacityInput.value;
+            setUnavailableOpacityCSS(parseFloat(opacityInput.value));
+        });
+    }
 });
 document.getElementById('save')?.addEventListener('click', saveOptions);
 
