@@ -9,8 +9,8 @@ export class TMDBClient {
 
     // Adaptive rate limiting
     private minRPS = 1;
-    private maxRPS = 25;
-    private rps = 4;
+    private maxRPS = 30;
+    private rps = 10;
 
     constructor(private apiKey: string, readApiKey?: string) {
         this.headers = {
@@ -24,7 +24,7 @@ export class TMDBClient {
         await this.rateLimit();
         const response = await fetch(input, init);
         if (response.status === 429) {
-            this.rps - 2 > this.minRPS? this.rps -= 2 : this.rps = this.minRPS;
+            this.rps = Math.max(this.rps - 2, this.minRPS);
             logger.warn(`[TMDBClient] 429 received, reducing RPS to ${this.rps}`);
         } else if (response.ok) {
             if (this.rps < this.maxRPS) {
