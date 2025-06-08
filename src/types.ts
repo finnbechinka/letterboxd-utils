@@ -8,6 +8,7 @@ export interface ExtensionSettings {
     countryCode?: string;
     unavailableOpacity?: number;
     fadeUnavailable?: boolean;
+    trueRatingsStats?: boolean; // add this line
 }
 
 /**
