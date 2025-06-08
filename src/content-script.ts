@@ -277,7 +277,7 @@ browser.storage.onChanged.addListener((changes, area) => {
 });
 
 logger.info('[ContentScript] Initializing extension...');
-browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'countryCode', 'unavailableOpacity', 'fadeUnavailable'])
+browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'countryCode', 'unavailableOpacity', 'fadeUnavailable', 'trueRatingsStats'])
     .then((result: { [key: string]: any }) => {
         const settings = result as ExtensionSettings;
         const fade = settings.fadeUnavailable !== false;
@@ -293,14 +293,149 @@ browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 
         const providers = settings.selectedProviders || DEFAULT_PROVIDERS;
         new StreamFilter(settings.tmdbApiKey, providers, country, settings.tmdbReadApiKey).observePage();
         addFadeToggleToNav();
+        observeRatingsStatsFeature();
     })
     .catch(error => {
         logger.error(`[ContentScript] Error loading settings: ${error}`);
         setUnavailableOpacityCSS(0.4);
         new StreamFilter('', DEFAULT_PROVIDERS, DEFAULT_COUNTRY).observePage();
         addFadeToggleToNav();
+        observeRatingsStatsFeature();
     });
 logger.info('[ContentScript] Script loaded successfully');
+
+// --- TRUE RATINGS STATS FEATURE ---
+function parseRatingsHistogram(): number[] | null {
+    const section = document.querySelector('.section.ratings-histogram-chart');
+    if (!section) return null;
+    const bars = section.querySelectorAll('li.rating-histogram-bar a');
+    if (!bars.length) return null;
+
+    // Map of rating value to count
+    // Ratings order: 0.5, 1, 1.5, ..., 5
+    const ratingValues = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
+    const counts: number[] = [];
+
+    bars.forEach((a, i) => {
+        // Example: "1,343 half-★ ratings (0%)"
+        // or "3,808 ★ ratings (1%)"
+        const text = a.getAttribute('data-original-title') || a.textContent || '';
+        const match = text.match(/([\d,]+)[^\d]+ratings/);
+        if (match) {
+            counts[i] = parseInt(match[1].replace(/,/g, ''), 10);
+        } else {
+            counts[i] = 0;
+        }
+    });
+
+    // Expand to array of all ratings
+    const ratings: number[] = [];
+    for (let i = 0; i < ratingValues.length; ++i) {
+        for (let j = 0; j < (counts[i] || 0); ++j) {
+            ratings.push(ratingValues[i]);
+        }
+    }
+    return ratings;
+}
+
+function calcStats(ratings: number[]) {
+    if (!ratings.length) return null;
+    const n = ratings.length;
+    const sorted = [...ratings].sort((a, b) => a - b);
+    const sum = ratings.reduce((a, b) => a + b, 0);
+    const mean = sum / n;
+    const median = n % 2 === 0
+        ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+        : sorted[Math.floor(n / 2)];
+    // Mode: most frequent value(s)
+    const freq: Record<number, number> = {};
+    let maxFreq = 0;
+    let mode: number[] = [];
+    for (const r of ratings) {
+        freq[r] = (freq[r] || 0) + 1;
+        if (freq[r] > maxFreq) {
+            maxFreq = freq[r];
+        }
+    }
+    mode = Object.keys(freq)
+        .filter(k => freq[+k] === maxFreq)
+        .map(Number);
+    // Standard deviation
+    const variance = ratings.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / n;
+    const stddev = Math.sqrt(variance);
+    return { mean, median, mode, stddev, n };
+}
+
+function injectTrueRatingsStats() {
+    // Find the main Letterboxd ratings section
+    const origSection = document.querySelector('.section.ratings-histogram-chart:not(.imdb-ratings):not(.tomato-ratings):not(.meta-ratings)');
+    if (!origSection) return;
+
+    // Avoid duplicate insertion
+    if (origSection.nextElementSibling && origSection.nextElementSibling.classList.contains('true-ratings-stats-section')) return;
+
+    const ratings = parseRatingsHistogram();
+    if (!ratings) return;
+    const stats = calcStats(ratings);
+    if (!stats) return;
+
+    // Create a new section for the stats
+    const statsSection = document.createElement('section');
+    statsSection.className = 'section true-ratings-stats-section';
+    statsSection.style.marginTop = '10px';
+
+    const heading = document.createElement('h2');
+    heading.className = 'section-heading';
+    heading.textContent = 'True Ratings Stats';
+
+    const statsDiv = document.createElement('div');
+    statsDiv.className = 'true-ratings-stats';
+    statsDiv.style.fontSize = '13px';
+    statsDiv.style.color = '#666';
+
+    statsDiv.innerHTML = `
+        <div>
+            <strong>True average:</strong> ${stats.mean.toFixed(2)}<br>
+            <strong>Median:</strong> ${stats.median.toFixed(2)}<br>
+            <strong>Mode:</strong> ${stats.mode.join(', ')}<br>
+            <strong>Standard deviation:</strong> ${stats.stddev.toFixed(2)}<br>
+            <strong>Total ratings:</strong> ${stats.n.toLocaleString()}
+        </div>
+    `;
+
+    statsSection.appendChild(heading);
+    statsSection.appendChild(statsDiv);
+
+    // Insert after the original ratings section
+    origSection.parentElement?.insertBefore(statsSection, origSection.nextElementSibling);
+}
+
+// Observe for ratings section and inject stats if enabled
+function observeRatingsStatsFeature() {
+    let enabled = false;
+    browser.storage.local.get('trueRatingsStats').then(res => {
+        enabled = !!res.trueRatingsStats;
+        if (enabled) injectTrueRatingsStats();
+    });
+
+    // Listen for changes to the setting
+    browser.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.trueRatingsStats) {
+            enabled = !!changes.trueRatingsStats.newValue;
+            if (enabled) injectTrueRatingsStats();
+            else {
+                // Remove stats if present
+                document.querySelectorAll('.true-ratings-stats').forEach(e => e.remove());
+            }
+        }
+    });
+
+    // Observe DOM changes to re-inject if needed
+    const observer = new MutationObserver(() => {
+        if (enabled) injectTrueRatingsStats();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+}
 
 // Add a toggle button to the nav bar for fading unavailable movies
 function addFadeToggleToNav() {

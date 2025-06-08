@@ -14,6 +14,7 @@ async function saveOptions() {
     const countryCode = (document.getElementById('country') as HTMLSelectElement).value;
     const opacity = parseFloat((document.getElementById('opacity') as HTMLInputElement).value);
     const fadeToggle = (document.getElementById('fadeToggle') as HTMLInputElement).checked;
+    const trueRatingsStats = (document.getElementById('trueRatingsStats') as HTMLInputElement)?.checked;
 
     const settings: ExtensionSettings = {
         tmdbApiKey: apiKey,
@@ -21,7 +22,8 @@ async function saveOptions() {
         selectedProviders: Array.from(providerCheckboxes).map(cb => cb.value),
         countryCode: countryCode,
         unavailableOpacity: opacity,
-        fadeUnavailable: fadeToggle
+        fadeUnavailable: fadeToggle,
+        trueRatingsStats
     };
 
     try {
@@ -42,7 +44,10 @@ async function saveOptions() {
 
 async function loadOptions() {
     try {
-        const result = await browser.storage.local.get(['tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'unavailableOpacity', 'fadeUnavailable']);
+        const result = await browser.storage.local.get([
+            'tmdbApiKey', 'tmdbReadApiKey', 'selectedProviders', 'unavailableOpacity', 'fadeUnavailable',
+            'trueRatingsStats'
+        ]);
 
         if (result.tmdbApiKey) {
             (document.getElementById('apiKey') as HTMLInputElement).value = result.tmdbApiKey;
@@ -71,6 +76,12 @@ async function loadOptions() {
             (document.getElementById('fadeToggle') as HTMLInputElement).checked = result.fadeUnavailable;
         } else {
             (document.getElementById('fadeToggle') as HTMLInputElement).checked = true;
+        }
+
+        if (typeof result.trueRatingsStats === 'boolean') {
+            (document.getElementById('trueRatingsStats') as HTMLInputElement).checked = result.trueRatingsStats;
+        } else {
+            (document.getElementById('trueRatingsStats') as HTMLInputElement).checked = false;
         }
     } catch (error) {
         logger.error(`[Options] Error loading settings: ${error}`);
